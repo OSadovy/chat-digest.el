@@ -744,7 +744,8 @@ to CHUNK, and links to URLS, the links the messages actually hold."
 
 (cl-defstruct (chat-digest--job (:copier nil))
   chat source state status cancel started model
-  chunk more context refs threads digest buffer)
+  chunk more context refs threads digest buffer
+  previous)
 
 (defvar chat-digest--jobs (make-hash-table :test #'equal)
   "Digests being made or waiting to be read, by chat.")
@@ -756,53 +757,75 @@ to CHUNK, and links to URLS, the links the messages actually hold."
 (defun chat-digest--notify (_kind format-string &rest args)
   (apply #'message format-string args))
 
+(defun chat-digest--abandon (job)
+  "Drop unfinished JOB, putting back the digest it was remaking, if any.
+Returns that digest's job."
+  (let ((key (chat-digest--key (chat-digest--job-chat job)))
+        (previous (chat-digest--job-previous job)))
+    (if previous
+        (puthash key previous chat-digest--jobs)
+      (remhash key chat-digest--jobs))
+    previous))
+
 (defun chat-digest--fail (job what)
-  (remhash (chat-digest--key (chat-digest--job-chat job)) chat-digest--jobs)
-  (chat-digest--notify 'warning "Digest of %s failed: %s"
-                       (plist-get (chat-digest--job-chat job) :title) what))
+  (chat-digest--notify 'warning "Digest of %s failed: %s%s"
+                       (plist-get (chat-digest--job-chat job) :title) what
+                       (if (chat-digest--abandon job)
+                           "; the previous digest is still there"
+                         "")))
 
 (defmacro chat-digest--step (job &rest body)
-  "Run BODY as a step of JOB, reporting an error as JOB's failure."
+  "Run BODY as a step of JOB, reporting an error as JOB's failure.
+Nothing runs once JOB is no longer the chat's current job: a fetch
+still in flight when its digest was cancelled must not finish it."
   (declare (indent 1))
-  `(condition-case err
-       (progn ,@body)
-     (error (chat-digest--fail ,job (error-message-string err)))))
+  (let ((j (make-symbol "job")))
+    `(let ((,j ,job))
+       (when (eq ,j (gethash (chat-digest--key (chat-digest--job-chat ,j))
+                             chat-digest--jobs))
+         (condition-case err
+             (progn ,@body)
+           (error (chat-digest--fail ,j (error-message-string err))))))))
 
-(defun chat-digest--start (chat &optional position)
+(defun chat-digest--start (chat &optional position previous)
   "Begin a digest of CHAT in the background.
-It covers what follows POSITION, by default the chat's read position."
+It covers what follows POSITION, by default the chat's read position.
+PREVIOUS is the job of a digest this one remakes, which stays in place
+until this one is ready, and comes back if it is not."
   (let* ((source (chat-digest--source (plist-get chat :source)))
          (job (make-chat-digest--job
                :chat chat :source source :status 'fetching
                :state (chat-digest--load-state chat)
-               :started (float-time)))
+               :started (float-time)
+               :previous previous))
          (position (or position
                        (funcall (chat-digest-source-read-position source) chat))))
     (puthash (chat-digest--key chat) job chat-digest--jobs)
     (message "Digest of %s: fetching" (plist-get chat :title))
-    (funcall
-     (chat-digest-source-fetch-after source) chat position
-     (1+ chat-digest-max-messages)
-     (lambda (new)
-       (chat-digest--step job
-         (if (null new)
-             (progn (remhash (chat-digest--key chat) chat-digest--jobs)
-                    (chat-digest--notify 'done "Nothing new in %s"
-                                         (plist-get chat :title)))
-           (let ((chunk (chat-digest--split-chunk new chat-digest-target-messages
-                                                  chat-digest-max-messages
-                                                  chat-digest-lull)))
-             (setf (chat-digest--job-chunk job) chunk
-                   (chat-digest--job-more job) (< (length chunk) (length new)))
-             (funcall
-              (chat-digest-source-fetch-before source) chat position
-              chat-digest-lead-in-max
-              (lambda (older)
-                (chat-digest--step job
-                  (chat-digest--gather-parents
-                   job (chat-digest--lead-in older (car chunk) chat-digest-lull
-                                             chat-digest-lead-in-max)
-                   nil chat-digest--reply-hops)))))))))))
+    (chat-digest--step job
+      (funcall
+       (chat-digest-source-fetch-after source) chat position
+       (1+ chat-digest-max-messages)
+       (lambda (new)
+         (chat-digest--step job
+           (if (null new)
+               (progn (chat-digest--abandon job)
+                      (chat-digest--notify 'done "Nothing new in %s"
+                                           (plist-get chat :title)))
+             (let ((chunk (chat-digest--split-chunk new chat-digest-target-messages
+                                                    chat-digest-max-messages
+                                                    chat-digest-lull)))
+               (setf (chat-digest--job-chunk job) chunk
+                     (chat-digest--job-more job) (< (length chunk) (length new)))
+               (funcall
+                (chat-digest-source-fetch-before source) chat position
+                chat-digest-lead-in-max
+                (lambda (older)
+                  (chat-digest--step job
+                    (chat-digest--gather-parents
+                     job (chat-digest--lead-in older (car chunk) chat-digest-lull
+                                               chat-digest-lead-in-max)
+                     nil chat-digest--reply-hops))))))))))))
 
 (defun chat-digest--by-date (messages)
   "Return MESSAGES oldest first, each once."
@@ -949,7 +972,8 @@ with the next digest.\n"
          )
     (setf (chat-digest--job-digest job) digest
           (chat-digest--job-status job) 'ready
-          (chat-digest--job-cancel job) nil)
+          (chat-digest--job-cancel job) nil
+          (chat-digest--job-previous job) nil)
     (chat-digest--make-buffer job)
     (chat-digest--notify 'done "Digest of %s ready, %d threads: M-x chat-digest"
                          (plist-get chat :title)
@@ -1302,8 +1326,13 @@ CHAT is the chat at point, or one asked for."
                       (round (- (float-time) (chat-digest--job-started job))))))))
 
 (defun chat-digest--this-job ()
-  (or chat-digest--buffer-job
-      (user-error "This digest has been approved already")))
+  "Return the unapproved digest this buffer shows, if it may be acted on."
+  (let ((job chat-digest--buffer-job))
+    (cond ((null job) (user-error "This digest has been approved already"))
+          ((not (eq job (gethash (chat-digest--key (chat-digest--job-chat job))
+                                 chat-digest--jobs)))
+           (user-error "This digest is being made again"))
+          (t job))))
 
 (defun chat-digest-approve (&optional continue)
   "Mark the messages of this digest read, and save the digest.
@@ -1325,9 +1354,7 @@ With CONTINUE, start on the next digest when more is unread."
   "Discard this digest and make it again."
   (interactive)
   (let ((job (chat-digest--this-job)))
-    (remhash (chat-digest--key (chat-digest--job-chat job)) chat-digest--jobs)
-    (setq chat-digest--buffer-job nil)
-    (chat-digest--start (chat-digest--job-chat job))))
+    (chat-digest--start (chat-digest--job-chat job) nil job)))
 
 (defun chat-digest-cancel (chat)
   "Stop making the digest of CHAT, or discard it if it is made."
@@ -1335,8 +1362,10 @@ With CONTINUE, start on the next digest when more is unread."
   (when-let ((job (gethash (chat-digest--key chat) chat-digest--jobs)))
     (when-let ((cancel (chat-digest--job-cancel job)))
       (funcall cancel))
-    (remhash (chat-digest--key chat) chat-digest--jobs)
-    (message "Digest of %s discarded" (plist-get chat :title))))
+    (message (if (chat-digest--abandon job)
+                 "Remaking the digest of %s stopped; the previous one is back"
+               "Digest of %s discarded")
+             (plist-get chat :title))))
 
 (defun chat-digest-edit-interests (chat)
   "Edit what matters in CHAT, starting from the default."

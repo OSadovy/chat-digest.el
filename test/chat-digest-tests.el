@@ -157,6 +157,39 @@
     (should (string-match-p "\\[Bob [0-9][0-9]:[0-9][0-9]\\]\\]\\'"
                             (chat-digest--message-link chat (gethash "m7" refs))))))
 
+(ert-deftest chat-digest-test-remake ()
+  ;; While a digest is made again the one on screen cannot be acted on, and
+  ;; when the new one fails the old one is back.
+  (let* ((chat-digest-directory (make-temp-file "chat-digest" t))
+         (chat (list :source "test" :account "a" :id "remake" :title "T"))
+         (messages (list (list :id 1 :date 0 :sender "A" :text "hi")))
+         (chat-digest-sources
+          (list (chat-digest-source-create
+                 :name "test"
+                 :read-position (lambda (_chat) 0)
+                 :fetch-after (lambda (_chat _id _limit cb) (funcall cb messages))
+                 :fetch-before (lambda (_chat _id _limit cb) (funcall cb nil))
+                 :fetch-ids (lambda (_chat _ids cb) (funcall cb nil)))))
+         (old (make-chat-digest--job :chat chat :status 'ready))
+         (answer nil))
+    (puthash (chat-digest--key chat) old chat-digest--jobs)
+    (cl-letf (((symbol-function 'chat-digest--run-model)
+               (lambda (_setting _dir _prompt callback)
+                 (setq answer callback)
+                 #'ignore)))
+      (unwind-protect
+          (with-temp-buffer
+            (setq chat-digest--buffer-job old)
+            (chat-digest-redo)
+            (should answer)
+            (should (string-match-p
+                     "being made again"
+                     (cadr (should-error (chat-digest--this-job) :type 'user-error))))
+            (funcall answer "not logged in")
+            (should (eq (chat-digest--this-job) old)))
+        (remhash (chat-digest--key chat) chat-digest--jobs)
+        (delete-directory chat-digest-directory t)))))
+
 (ert-deftest chat-digest-test-transcript ()
   (let* ((day 1790380800)               ; a midnight, local time aside
          (a (list :id 1 :date (+ day 36000) :sender "Ann" :text "Is the RPC\nfree?"))
@@ -198,12 +231,16 @@
                                                      held)
                                                     limit)))))
          (job (make-chat-digest--job
+               :chat (list :source "test" :account "a" :id "context")
                :source source
                :chunk (list (list :id 10 :date 20000 :reply-to 5))))
          context)
+    (puthash (chat-digest--key (chat-digest--job-chat job)) job chat-digest--jobs)
     (cl-letf (((symbol-function 'chat-digest--enrich-and-ask)
                (lambda (_job c) (setq context c))))
-      (chat-digest--gather-parents job nil nil chat-digest--reply-hops))
+      (unwind-protect
+          (chat-digest--gather-parents job nil nil chat-digest--reply-hops)
+        (remhash (chat-digest--key (chat-digest--job-chat job)) chat-digest--jobs)))
     (should (equal (mapcar (lambda (m) (plist-get m :id)) context) '(1 2 3 4 5)))))
 
 (when (require 'telega nil t)
