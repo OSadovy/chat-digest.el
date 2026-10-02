@@ -27,10 +27,13 @@ Telegram is the one source so far, through [telega](https://github.com/zevlg/tel
   [fxtwitter](https://github.com/FxEmbed/FxEmbed) API, X Articles included;
   only the post ids leave the machine. Other links without a preview are
   previewed by the source; for Telegram that is Telegram's own servers.
-- **The model** is Claude, through the Claude Code CLI, `claude -p`, run in
-  the background with every tool, MCP server and settings file switched off and
-  with a fixed output schema. It can only answer, so a message in the chat
-  that tries to instruct it cannot make it do anything.
+- **The model** is chosen by `chat-digest-model`, editable in Customize:
+  Claude through the Claude Code CLI, `claude -p`, by default Opus at medium
+  effort; or any model of a gptel backend, such as OpenAI's through the Codex
+  subscription. Either way it runs in the background with no tools and a fixed
+  output schema, and Claude Code with its MCP servers and settings files off
+  too. It can only answer, so a message in the chat that tries to instruct it
+  cannot make it do anything. Each digest says which model wrote it.
 - **Announcements**, meaning posts forwarded from a channel and pins, are
   listed apart from the threads, whatever the model makes of them.
 
@@ -79,7 +82,9 @@ Chats are kept by id, since titles change; `index.org` is where their names are.
 
 ## Setup
 
-Needs Emacs 29.1, the `claude` CLI logged in, and, for Telegram, telega.
+Needs Emacs 29.1, and either the `claude` CLI logged in or gptel; for
+Telegram, telega. A gptel backend's model must be one the backend lists: gptel
+otherwise sends the backend's first model in its place.
 
 ```elisp
 (with-eval-after-load 'telega

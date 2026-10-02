@@ -13,7 +13,8 @@
 ;; becomes `chat-digest-directory'.  DIGESTS digests are made one after the
 ;; other, each approved, so the registry carries from one to the next; each
 ;; is copied to STORE/replay-N.org.  Marking read moves only the recording's
-;; own position.
+;; own position.  CHAT_DIGEST_MODEL in the environment, read as Lisp, stands in
+;; for `chat-digest-model'.
 
 ;;; Code:
 
@@ -78,6 +79,8 @@
   (pcase-let ((`(,recording ,store ,n) command-line-args-left))
     (setq command-line-args-left nil
           chat-digest-directory (expand-file-name store))
+    (when-let ((model (getenv "CHAT_DIGEST_MODEL")))
+      (setq chat-digest-model (car (read-from-string model))))
     (chat-digest-replay-load recording)
     (let ((chat (list :source "replay" :account "local" :id "chat"
                       :title chat-digest-replay--title)))
