@@ -384,8 +384,9 @@ marks a silence; silences often separate conversations.  Lines under \
 
 Group the new messages into threads.  A thread is one conversation about one \
 topic.  Replies are strong evidence, but people often answer without replying, \
-so use timing, who is talking to whom, and topic too.  A message belongs to at \
-most one thread.  Messages that carry nothing (greetings, emoji, \"+1\") need \
+so use timing, who is talking to whom, and topic too.  When a long \
+conversation moves through distinct sub-topics, each sub-topic is a thread of \
+its own.  A message belongs to at most one thread.  Messages that carry nothing (greetings, emoji, \"+1\") need \
 no thread.
 
 When new messages continue a thread from an earlier digest, give its id; \
@@ -413,7 +414,11 @@ by writing the words that state it as [words](m12), the words of the claim \
 rather than the name: \"Ann says the new release [cut build times by about \
 40%](m41)\".  A link from the input can be written the same way, \
 [words](URL).  In messages, list only the messages a point rests on that you \
-could not link that way.  One to six points; a low thread usually needs one.
+could not link that way.  Make as many points as the thread has distinct \
+claims, arguments and answers worth knowing: a long technical exchange on the \
+reader's interests may need a dozen, a low thread usually one.  Do not merge \
+distinct arguments into one point to save space.  Keep a short statement that \
+sums up a position, close to its own words, with who said it.
 - links: the links worth opening, each with what it is and why it was posted, \
 taken from its preview when there is one.  Copy URLs exactly from the input.
 - summary: the running memory of this thread for future digests: what it is \
