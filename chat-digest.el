@@ -94,10 +94,6 @@ Not interesting: greetings, banter, memes, politics, off-topic chatter."
 nil leaves the choice to the program's own settings."
   :type '(choice (const :tag "Program default" nil) string))
 
-(defcustom chat-digest-continue t
-  "Non-nil to start the next digest as soon as one is approved."
-  :type 'boolean)
-
 (defcustom chat-digest-enrich-timeout 30
   "Seconds to wait for link previews before summarizing without them."
   :type 'natnum)
@@ -370,8 +366,12 @@ conversation they were posted in: a report dropped into banter is its own \
 thread.
 - points: the substance, most important first: claims with their numbers, \
 the tools, projects and people named, disagreements, questions and the answers \
-they got.  Say who claimed what.  Cite the one to three messages each point rests on \
-most directly.  One to six points; a low thread usually needs one.
+they got.  Say who claimed what.  Link each claim to the message it comes from \
+by writing the words that state it as [words](m12), the words of the claim \
+rather than the name: \"Ann says the new release [cut build times by about \
+40%](m41)\".  A link from the input can be written the same way, \
+[words](URL).  In messages, list only the messages a point rests on that you \
+could not link that way.  One to six points; a low thread usually needs one.
 - links: the links worth opening, each with what it is and why it was posted, \
 taken from its preview when there is one.  Copy URLs exactly from the input.
 - summary: the running memory of this thread for future digests: what it is \
@@ -380,7 +380,7 @@ said that still matters.  At most four sentences.
 - messages: every new message that belongs to the thread.
 
 overview: two or three sentences on what this stretch of the chat was about, \
-naming the most important thing in it.
+naming the most important thing in it, linked the same way.
 
 Write in the main language of the chat's messages.
 
@@ -599,6 +599,28 @@ wrong.  Returns the process."
       (process-send-eof proc)
       proc)))
 
+(defconst chat-digest--inline-link-re
+  "\\[\\([^]\n]+\\)\\](\\(m[0-9]+\\|https?://[^) \n]+\\))"
+  "An inline link in the model's text: [words](m12) or [words](URL).")
+
+(defun chat-digest--segments (text refs urls)
+  "Split TEXT into strings and links, as a list.
+A link is (WORDS . TARGET), TARGET a message or a URL.  A link to a
+message REFS does not name, or to a URL not among URLS, stays as its
+words."
+  (let ((start 0) (out nil))
+    (while (string-match chat-digest--inline-link-re text start)
+      (let* ((words (match-string 1 text))
+             (to (match-string 2 text))
+             (target (if (string-prefix-p "m" to)
+                         (gethash to refs)
+                       (car (member to urls)))))
+        (push (substring text start (match-beginning 0)) out)
+        (push (if target (cons words target) words) out)
+        (setq start (match-end 0))))
+    (push (substring text start) out)
+    (nreverse (delete "" out))))
+
 (defun chat-digest--parse (answer refs chunk urls)
   "Turn the model's ANSWER into a digest plist.
 REFS maps message names back to messages.  Thread membership is kept
@@ -609,10 +631,11 @@ to CHUNK, and links to URLS, the links the messages actually hold."
                            for m = (gethash name refs)
                            when (and m (or (not chunk-only)
                                            (gethash (plist-get m :id) in-chunk)))
-                           collect m))))
+                           collect m)))
+         (segments (lambda (text) (chat-digest--segments (or text "") refs urls))))
     (dolist (m chunk) (puthash (plist-get m :id) t in-chunk))
     (list
-     :overview (plist-get answer :overview)
+     :overview (funcall segments (plist-get answer :overview))
      :threads
      (cl-loop
       for th in (plist-get answer :threads)
@@ -627,10 +650,8 @@ to CHUNK, and links to URLS, the links the messages actually hold."
             :summary (plist-get th :summary)
             :messages messages
             :points (cl-loop for p in (plist-get th :points)
-                             collect (list :text (plist-get p :text)
-                                           :messages (seq-take
-                                                      (funcall deref (plist-get p :messages))
-                                                      3)))
+                             collect (list :text (funcall segments (plist-get p :text))
+                                           :messages (funcall deref (plist-get p :messages))))
             :links (cl-loop for l in (plist-get th :links)
                             for url = (plist-get l :url)
                             when (member url urls)
@@ -821,10 +842,23 @@ FETCHED are the messages added this way so far."
         (erase-buffer)
         (setq default-directory (chat-digest--digests-directory chat))
         (insert (chat-digest--render job))
-        (chat-digest-mode)
-        (setq chat-digest--buffer-job job
-              chat-digest--buffer-chat chat)
-        (goto-char (point-min))))
+        (let ((actions (point-marker)))
+          (insert "\n* What next\n"
+                  "[[chat-digest-action:approve][Approve]], marking these messages read.\n"
+                  (if (chat-digest--job-more job)
+                      "[[chat-digest-action:continue][Approve and continue]] \
+with the next digest.\n"
+                    "")
+                  "[[chat-digest-action:redo][Make this digest again]].\n"
+                  "[[chat-digest-action:interests][Edit what matters in this chat]].\n")
+          (chat-digest-mode)
+          (setq chat-digest--buffer-job job
+                chat-digest--buffer-chat chat
+                chat-digest--actions actions)
+          (goto-char actions)
+          (org-next-visible-heading 1)
+          (org-fold-show-subtree)
+          (goto-char (point-min)))))
     (setf (chat-digest--job-buffer job) buffer)))
 
 (defun chat-digest--ready (job answer)
@@ -849,14 +883,35 @@ FETCHED are the messages added this way so far."
   "Return TEXT fit for an Org link description."
   (replace-regexp-in-string "[][]" "" (or text "")))
 
-(defun chat-digest--message-link (chat m)
-  "Return an Org link opening message M of CHAT."
+(defun chat-digest--nick (sender)
+  "Return SENDER's name kept short: up to any \" | \"."
+  (truncate-string-to-width
+   (string-trim (car (split-string (or sender "") " | "))) 24))
+
+(defun chat-digest--message-link (chat m &optional words)
+  "Return an Org link opening message M of CHAT, reading WORDS.
+Without WORDS it reads the sender and the time."
   (format "[[chat-digest:%s/%s/%s/%s][%s]]"
           (url-hexify-string (plist-get chat :source))
           (url-hexify-string (plist-get chat :account))
           (url-hexify-string (format "%s" (plist-get chat :id)))
           (url-hexify-string (format "%s" (plist-get m :id)))
-          (format-time-string "%H:%M" (plist-get m :date))))
+          (chat-digest--org-safe
+           (or words
+               (format "%s %s" (chat-digest--nick (plist-get m :sender))
+                       (format-time-string "%H:%M" (plist-get m :date)))))))
+
+(defun chat-digest--render-segments (chat segments)
+  "Return SEGMENTS of model text as Org, links to CHAT's messages included."
+  (string-trim
+   (mapconcat
+    (lambda (seg)
+      (pcase seg
+        ((pred stringp) seg)
+        (`(,words . ,(and url (pred stringp)))
+         (format "[[%s][%s]]" url (chat-digest--org-safe words)))
+        (`(,words . ,m) (chat-digest--message-link chat m words))))
+    segments "")))
 
 (defun chat-digest--body (text)
   "Return TEXT indented so no line of it reads as an Org heading."
@@ -890,7 +945,7 @@ FETCHED are the messages added this way so far."
     (with-temp-buffer
       (insert (format "#+title: Digest of %s\n#+startup: content\n\n"
                       (plist-get chat :title)))
-      (insert (string-trim (or (plist-get digest :overview) "")) "\n\n")
+      (insert (chat-digest--render-segments chat (plist-get digest :overview)) "\n\n")
       (insert (format "%d new messages, %s.%s\n"
                       (length chunk) (chat-digest--range chunk)
                       (if (chat-digest--job-more job)
@@ -929,11 +984,17 @@ FETCHED are the messages added this way so far."
                                               (file-name-base file)))
                                   "")))))
             (dolist (p (plist-get th :points))
-              (insert "- " (string-trim (plist-get p :text)))
+              (insert "- " (chat-digest--render-segments chat (plist-get p :text)))
               (when-let ((ms (plist-get p :messages)))
                 (insert " (" (mapconcat link ms ", ") ")"))
               (insert "\n"))
-            (dolist (l (plist-get th :links))
+            (dolist (l (cl-remove-if
+                        ;; Already linked from the words of a point.
+                        (lambda (l)
+                          (cl-loop for p in (plist-get th :points)
+                                   thereis (rassoc (plist-get l :url)
+                                                   (plist-get p :text))))
+                        (plist-get th :links)))
               (insert (format "- [[%s][%s]]: %s"
                               (plist-get l :url)
                               (chat-digest--org-safe
@@ -982,8 +1043,9 @@ A thread the model continued keeps its id; any other gets a new one."
       (setq name (format "%s-%d.org" base (cl-incf n))))
     name))
 
-(defun chat-digest--approve (job)
-  "Mark JOB's messages read, then record and save its digest."
+(defun chat-digest--approve (job &optional continue)
+  "Mark JOB's messages read, then record and save its digest.
+With CONTINUE, start the next digest when more is unread."
   (let* ((chat (chat-digest--job-chat job))
          (chunk (chat-digest--job-chunk job))
          (last-id (plist-get (car (last chunk)) :id)))
@@ -992,54 +1054,55 @@ A thread the model continued keeps its id; any other gets a new one."
      (chat-digest-source-mark-read (chat-digest--job-source job)) chat last-id
      (lambda (ok)
        (chat-digest--step job
-			  (if (not ok)
-			      (progn (setf (chat-digest--job-status job) 'ready)
-				     (chat-digest--notify 'warning "Could not mark %s read"
-							  (plist-get chat :title)))
-			    (let* ((state (chat-digest--job-state job))
-				   (file (chat-digest--digest-file chat chunk))
-				   (dir (chat-digest--digests-directory chat))
-				   (digest (chat-digest--job-digest job)))
-			      (chat-digest--commit state digest file)
-			      (puthash "digests"
-				       (vconcat
-					(gethash "digests" state)
-					(list
-					 (let ((d (make-hash-table :test #'equal)))
-					   (puthash "file" file d)
-					   (puthash "from" (plist-get (car chunk) :date) d)
-					   (puthash "to" (plist-get (car (last chunk)) :date) d)
-					   (puthash "count" (length chunk) d)
-					   (puthash "headlines"
-						    (vconcat
-						     (cl-loop for th in (plist-get digest :threads)
-							      unless (eq (plist-get th :importance) 'low)
-							      collect (plist-get th :headline)))
-						    d)
-					   d)))
-				       state)
-			      (puthash "position" (format "%s" last-id) state)
-			      (make-directory dir t)
-			      (with-current-buffer (chat-digest--job-buffer job)
-				(let ((inhibit-read-only t))
-				  (write-region nil nil (expand-file-name file dir) nil 'silent)))
-			      (chat-digest--save-state chat state)
-			      (chat-digest--write-index)
-			      (remhash (chat-digest--key chat) chat-digest--jobs)
-			      (with-current-buffer (chat-digest--job-buffer job)
-				(setq chat-digest--buffer-job nil)
-				(rename-buffer (format "*digest: %s, %s*" (plist-get chat :title)
-						       (file-name-base file))
-					       t))
-			      (if (and chat-digest-continue (chat-digest--job-more job))
-				  (progn
-				    (message "Approved; next digest of %s on its way"
-					     (plist-get chat :title))
-				    ;; The chat reports its new read position a moment after
-				    ;; marking returns, so the position is passed on instead.
-				    (chat-digest--start chat last-id))
-				(chat-digest--notify 'done "Approved; %s is read"
-						     (plist-get chat :title))))))))))
+         (if (not ok)
+             (progn (setf (chat-digest--job-status job) 'ready)
+                    (chat-digest--notify 'warning "Could not mark %s read"
+                                         (plist-get chat :title)))
+           (chat-digest--record job)
+           (if (and continue (chat-digest--job-more job))
+               (progn
+                 (message "Approved; next digest of %s on its way"
+                          (plist-get chat :title))
+                 ;; The chat reports its new read position a moment after
+                 ;; marking returns, so the position is passed on instead.
+                 (chat-digest--start chat last-id))
+             (chat-digest--notify 'done "Approved %s"
+                                  (plist-get chat :title)))))))))
+
+(defun chat-digest--record (job)
+  "Save JOB's digest and record it in the registry and the index."
+  (let* ((chat (chat-digest--job-chat job))
+         (chunk (chat-digest--job-chunk job))
+         (state (chat-digest--job-state job))
+         (digest (chat-digest--job-digest job))
+         (file (chat-digest--digest-file chat chunk))
+         (dir (chat-digest--digests-directory chat))
+         (entry (make-hash-table :test #'equal)))
+    (chat-digest--commit state digest file)
+    (puthash "file" file entry)
+    (puthash "from" (plist-get (car chunk) :date) entry)
+    (puthash "to" (plist-get (car (last chunk)) :date) entry)
+    (puthash "count" (length chunk) entry)
+    (puthash "headlines"
+             (vconcat (cl-loop for th in (plist-get digest :threads)
+                               unless (eq (plist-get th :importance) 'low)
+                               collect (plist-get th :headline)))
+             entry)
+    (puthash "digests" (vconcat (gethash "digests" state) (list entry)) state)
+    (puthash "position" (format "%s" (plist-get (car (last chunk)) :id)) state)
+    (make-directory dir t)
+    (with-current-buffer (chat-digest--job-buffer job)
+      (let ((inhibit-read-only t))
+        (write-region (point-min) chat-digest--actions
+                      (expand-file-name file dir) nil 'silent)
+        (delete-region chat-digest--actions (point-max)))
+      (setq chat-digest--buffer-job nil)
+      (rename-buffer (format "*digest: %s, %s*" (plist-get chat :title)
+                             (file-name-base file))
+                     t))
+    (chat-digest--save-state chat state)
+    (chat-digest--write-index)
+    (remhash (chat-digest--key chat) chat-digest--jobs)))
 
 ;;;; Index
 
@@ -1087,14 +1150,29 @@ A thread the model continued keeps its id; any other gets a new one."
 
 ;;;; Commands
 
+(defun chat-digest--follow-action (action _)
+  (call-interactively
+   (pcase action
+     ("approve" #'chat-digest-approve)
+     ("continue" #'chat-digest-approve-and-continue)
+     ("redo" #'chat-digest-redo)
+     ("interests" #'chat-digest-edit-interests)
+     (_ (user-error "No digest action %s" action)))))
+
+(org-link-set-parameters "chat-digest-action" :follow #'chat-digest--follow-action)
+
 (defvar-local chat-digest--buffer-job nil
   "The unapproved digest this buffer shows.")
 
 (defvar-local chat-digest--buffer-chat nil
   "The chat this buffer digests.")
 
+(defvar-local chat-digest--actions nil
+  "Where this buffer's actions begin; the digest is what comes before.")
+
 (defvar-keymap chat-digest-mode-map
   "a" #'chat-digest-approve
+  "c" #'chat-digest-approve-and-continue
   "g" #'chat-digest-redo
   "i" #'chat-digest-edit-interests
   "q" #'quit-window
@@ -1148,15 +1226,21 @@ CHAT is the chat at point, or one asked for."
   (or chat-digest--buffer-job
       (user-error "This digest has been approved already")))
 
-(defun chat-digest-approve ()
-  "Mark the messages of this digest read, and save the digest."
+(defun chat-digest-approve (&optional continue)
+  "Mark the messages of this digest read, and save the digest.
+With CONTINUE, start on the next digest when more is unread."
   (interactive)
   (let ((job (chat-digest--this-job)))
     (unless (eq (chat-digest--job-status job) 'ready)
       (user-error "Already approving"))
     (when (y-or-n-p (format "Mark %d messages read? "
                             (length (chat-digest--job-chunk job))))
-      (chat-digest--approve job))))
+      (chat-digest--approve job continue))))
+
+(defun chat-digest-approve-and-continue ()
+  "Approve this digest, then start on the next one."
+  (interactive)
+  (chat-digest-approve t))
 
 (defun chat-digest-redo ()
   "Discard this digest and make it again."

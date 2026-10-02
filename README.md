@@ -15,8 +15,7 @@ Telegram is the one source so far, through [telega](https://github.com/zevlg/tel
 
 - **What it covers.** What follows the chat's read position, up to
   `chat-digest-max-messages` (350), ending where the chat went quiet for
-  `chat-digest-lull` (20 minutes) so that no conversation is cut in half. When
-  more is unread, approving one digest starts the next.
+  `chat-digest-lull` (20 minutes) so that no conversation is cut in half.
 - **Context.** The model also sees the conversation running into the new
   messages since the last lull, every reply chain they belong to followed up
   to its first message, and the few messages that led into that first message.
@@ -37,15 +36,22 @@ Telegram is the one source so far, through [telega](https://github.com/zevlg/tel
 
 ## Reading a digest
 
-| key   | does                                               |
-|-------|----------------------------------------------------|
-| `TAB` | open or close the thread at point                  |
-| `n` `p` | next, previous heading                           |
-| `RET` | follow the link at point                           |
-| `a`   | approve: mark the messages read, save the digest   |
-| `g`   | discard and make the digest again                  |
-| `i`   | edit what matters in this chat                     |
-| `q`   | leave                                              |
+Each point links its claims to the messages they come from: the words stating
+a claim are the link. Messages a point rests on that the model could not tie to
+particular words follow it, named by sender and time.
+
+| key     | does                                                     |
+|---------|----------------------------------------------------------|
+| `TAB`   | open or close the thread at point                        |
+| `n` `p` | next, previous heading                                   |
+| `RET`   | follow the link at point                                 |
+| `a`     | approve: mark the messages read and save the digest      |
+| `c`     | approve, then start on the next digest                   |
+| `g`     | discard and make the digest again                        |
+| `i`     | edit what matters in this chat                           |
+| `q`     | leave                                                    |
+
+The same actions are links under the last heading, What next.
 
 A message link opens the message without marking anything read. For Telegram
 that is telega's preview mode, which closes the chat while you look around;

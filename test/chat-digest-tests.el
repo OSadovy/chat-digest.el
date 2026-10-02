@@ -133,6 +133,23 @@
       (should (equal (mapcar (lambda (l) (plist-get l :url)) (plist-get th :links))
                      '("https://a.example"))))))
 
+(ert-deftest chat-digest-test-segments ()
+  ;; Links to a known message or URL become Org links; others, plain words.
+  (let ((refs (make-hash-table :test #'equal))
+        (chat (list :source "s" :account "a" :id "c")))
+    (puthash "m7" (list :id 7 :date 0 :sender "Bob | Team") refs)
+    (should (equal (chat-digest--render-segments
+                    chat
+                    (chat-digest--segments
+                     "Bob says [it is free](m7), see [the post](https://a.example); \
+[made up](m99) and [elsewhere](https://b.example)."
+                     refs '("https://a.example")))
+                   "Bob says [[chat-digest:s/a/c/7][it is free]], see \
+[[https://a.example][the post]]; made up and elsewhere."))
+    ;; Without words of its own, a message link reads its sender and time.
+    (should (string-match-p "\\[Bob [0-9][0-9]:[0-9][0-9]\\]\\]\\'"
+                            (chat-digest--message-link chat (gethash "m7" refs))))))
+
 (ert-deftest chat-digest-test-transcript ()
   (let* ((day 1790380800)               ; a midnight, local time aside
          (a (list :id 1 :date (+ day 36000) :sender "Ann" :text "Is the RPC\nfree?"))

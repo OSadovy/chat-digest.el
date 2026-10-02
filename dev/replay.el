@@ -77,8 +77,7 @@
 (defun chat-digest-replay-batch ()
   (pcase-let ((`(,recording ,store ,n) command-line-args-left))
     (setq command-line-args-left nil
-          chat-digest-directory (expand-file-name store)
-          chat-digest-continue nil)
+          chat-digest-directory (expand-file-name store))
     (chat-digest-replay-load recording)
     (let ((chat (list :source "replay" :account "local" :id "chat"
                       :title chat-digest-replay--title)))
