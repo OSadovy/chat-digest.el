@@ -372,8 +372,11 @@ moved on.
 
 For each thread:
 - title: a stable name for the topic, a few words.
-- headline: the main takeaway of the new messages in at most twelve words: \
-the fact, number or conclusion, not \"discussion of X\".
+- headline: what the thread is about, then what came of it, in about fifteen \
+words: \"Flaky integration tests: they shared one database, and now each gets \
+its own schema\".  What came of it is the fact, number or conclusion, not \
+\"it was discussed\".  Your own judgements of the messages, such as calling \
+something an advertisement, belong in the points.
 - importance: \"high\" when it matches the reader's interests and has \
 substance (a new tool or release, a benchmark, data, a technique, research, \
 an announcement); \"medium\" when relevant but thin; \
