@@ -19,17 +19,24 @@
             dates)))
 
 (ert-deftest chat-digest-test-split-chunk ()
-  (let ((ms (chat-digest-test--messages 0 10 20 2000 2010 2020 2030 2040)))
+  (let ((ids (lambda (ms) (mapcar (lambda (m) (plist-get m :id)) ms)))
+        ;; Lulls after the 3rd and after the 7th message.
+        (ms (chat-digest-test--messages 0 10 20 2000 2010 2020 2030 5000 5010 5020)))
     ;; Few enough: all of them.
-    (should (equal (chat-digest--split-chunk ms 8 1200) ms))
-    ;; Too many: cut at the lull after the third.
-    (should (equal (mapcar (lambda (m) (plist-get m :id))
-                           (chat-digest--split-chunk ms 6 1200))
+    (should (= (length (chat-digest--split-chunk ms 10 12 1200)) 10))
+    ;; The lull nearest the target, here past it.
+    (should (equal (funcall ids (chat-digest--split-chunk ms 6 9 1200))
+                   '(1 2 3 4 5 6 7)))
+    ;; ...or short of it.
+    (should (equal (funcall ids (chat-digest--split-chunk ms 4 9 1200))
                    '(1 2 3)))
-    ;; A lull that would keep less than half is ignored.
-    (should (= (length (chat-digest--split-chunk ms 7 1200)) 7))
-    ;; No lull: cut at the limit.
-    (should (= (length (chat-digest--split-chunk ms 5 100000)) 5))))
+    ;; A lull past the limit does not count; without one, all of them
+    ;; when they fit within the limit...
+    (let ((short (seq-take ms 7)))
+      (should (= (length (chat-digest--split-chunk short 5 7 100000)) 7)))
+    ;; ...and the longest silence when they do not.
+    (should (equal (funcall ids (chat-digest--split-chunk ms 6 8 100000))
+                   '(1 2 3 4 5 6 7)))))
 
 (ert-deftest chat-digest-test-lead-in ()
   (let* ((older (chat-digest-test--messages 0 10 3000 3010 3020))

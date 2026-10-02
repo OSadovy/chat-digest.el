@@ -13,9 +13,10 @@ Telegram is the one source so far, through [telega](https://github.com/zevlg/tel
 
 ## How a digest is made
 
-- **What it covers.** What follows the chat's read position, up to
-  `chat-digest-max-messages` (350), ending where the chat went quiet for
-  `chat-digest-lull` (20 minutes) so that no conversation is cut in half.
+- **What it covers.** What follows the chat's read position, about
+  `chat-digest-target-messages` (350) of it, ending where the chat went quiet
+  for `chat-digest-lull` (20 minutes) so that no conversation is cut in half.
+  To reach a lull it may run on to `chat-digest-max-messages` (500).
 - **Context.** The model also sees the conversation running into the new
   messages since the last lull, every reply chain they belong to followed up
   to its first message, and the few messages that led into that first message.

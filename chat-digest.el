@@ -24,8 +24,8 @@
 ;; chat itself; until then nothing has changed, so a digest can be thrown away
 ;; and made again.
 ;;
-;; A digest covers what follows the chat's own read position, up to
-;; `chat-digest-max-messages', cut where the chat went quiet for
+;; A digest covers what follows the chat's own read position, about
+;; `chat-digest-target-messages' of it, cut where the chat went quiet for
 ;; `chat-digest-lull' so a conversation is not split down the middle.  The
 ;; model also sees what the new messages reply to, the conversation running
 ;; into them since the last lull, and the threads earlier digests found, kept
@@ -58,8 +58,15 @@
   "Where digests, thread registries and per-chat interests are kept."
   :type 'directory)
 
-(defcustom chat-digest-max-messages 350
-  "Most new messages one digest covers."
+(defcustom chat-digest-target-messages 350
+  "How many new messages a digest aims to cover."
+  :type 'natnum)
+
+(defcustom chat-digest-max-messages 500
+  "Most new messages one digest covers.
+A digest may run past `chat-digest-target-messages' to this many, to
+end where the chat went quiet rather than in the middle of a
+conversation."
   :type 'natnum)
 
 (defcustom chat-digest-lull (* 20 60)
@@ -222,20 +229,35 @@ CALLBACK receives a plist with :title and :description, or nil."))
   "Return the seconds between messages A and B."
   (- (plist-get b :date) (plist-get a :date)))
 
-(defun chat-digest--split-chunk (messages limit lull)
+(defun chat-digest--split-chunk (messages target limit lull)
   "Return the leading part of MESSAGES that one digest covers.
-That is all of them when there are at most LIMIT.  Otherwise it ends
-at the last silence of LULL seconds within the first LIMIT, provided
-that keeps at least half of them, and at LIMIT when it does not."
-  (if (<= (length messages) limit)
-      messages
-    (let ((v (vconcat messages)))
-      (seq-take messages
-                (or (cl-loop for i from limit downto (max 1 (/ (1+ limit) 2))
-                             when (>= (chat-digest--gap (aref v (1- i)) (aref v i))
-                                      lull)
-                             return i)
-                    limit)))))
+All of them when there are at most TARGET.  Otherwise it ends at the
+silence of LULL seconds nearest TARGET, looking from half TARGET up to
+LIMIT messages.  Without one, it is all of them when they are at most
+LIMIT, and ends at the longest silence in that range when they are not."
+  (let ((n (length messages)))
+    (if (<= n target)
+        messages
+      (let* ((v (vconcat messages))
+             (from (max 1 (/ (1+ target) 2)))
+             (to (min limit (1- n)))
+             (gap (lambda (i) (chat-digest--gap (aref v (1- i)) (aref v i))))
+             (lull-cut
+              (cl-loop with best = nil
+                       for i from from to to
+                       when (and (>= (funcall gap i) lull)
+                                 (or (null best)
+                                     (< (abs (- i target)) (abs (- best target)))))
+                       do (setq best i)
+                       finally return best)))
+        (seq-take messages
+                  (cond (lull-cut)
+                        ((<= n limit) n)
+                        (t (cl-loop with best = from
+                                    for i from from to to
+                                    when (> (funcall gap i) (funcall gap best))
+                                    do (setq best i)
+                                    finally return best))))))))
 
 (defun chat-digest--lead-in (older first lull limit)
   "Return the end of OLDER that runs into message FIRST without a lull.
@@ -762,7 +784,8 @@ It covers what follows POSITION, by default the chat's read position."
              (progn (remhash (chat-digest--key chat) chat-digest--jobs)
                     (chat-digest--notify 'done "Nothing new in %s"
                                          (plist-get chat :title)))
-           (let ((chunk (chat-digest--split-chunk new chat-digest-max-messages
+           (let ((chunk (chat-digest--split-chunk new chat-digest-target-messages
+                                                  chat-digest-max-messages
                                                   chat-digest-lull)))
              (setf (chat-digest--job-chunk job) chunk
                    (chat-digest--job-more job) (< (length chunk) (length new)))
