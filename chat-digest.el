@@ -91,8 +91,16 @@ Not interesting: greetings, banter, memes, politics, off-topic chatter."
 
 (defcustom chat-digest-model "opus"
   "Model for `chat-digest-claude-program', as its --model takes it.
-nil leaves the choice to the program's own settings."
+nil leaves the choice to the program."
   :type '(choice (const :tag "Program default" nil) string))
+
+(defcustom chat-digest-effort "medium"
+  "Effort for `chat-digest-claude-program', as its --effort takes it.
+nil leaves the model's own default.  User settings are not read, so an
+effort set there for interactive work does not apply."
+  :type '(choice (const :tag "Model default" nil)
+                 (const "low") (const "medium") (const "high")
+                 (const "xhigh") (const "max")))
 
 (defcustom chat-digest-enrich-timeout 30
   "Seconds to wait for link previews before summarizing without them."
@@ -569,7 +577,8 @@ wrong.  Returns the process."
                    "--no-session-persistence" "--output-format" "json"
                    "--json-schema" chat-digest--schema
                    "--system-prompt" chat-digest--system-prompt)
-             (when chat-digest-model (list "--model" chat-digest-model)))
+             (when chat-digest-model (list "--model" chat-digest-model))
+             (when chat-digest-effort (list "--effort" chat-digest-effort)))
             :sentinel
             (lambda (proc _event)
               (unless (process-live-p proc)
