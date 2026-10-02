@@ -887,6 +887,9 @@ FETCHED are the messages added this way so far."
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
+        ;; It is where the digest will be saved, and commands that start a
+        ;; process refuse a directory that does not exist.
+        (make-directory (chat-digest--digests-directory chat) t)
         (setq default-directory (chat-digest--digests-directory chat))
         (insert (chat-digest--render job))
         (let ((actions (point-marker)))
