@@ -190,6 +190,22 @@
         (remhash (chat-digest--key chat) chat-digest--jobs)
         (delete-directory chat-digest-directory t)))))
 
+(ert-deftest chat-digest-test-approve-refused ()
+  ;; A source that refuses to mark read has marked nothing: the digest must
+  ;; stay approvable rather than stuck approving.
+  (let* ((chat (list :source "test" :account "a" :id "refused" :title "T"))
+         (job (make-chat-digest--job
+               :chat chat :status 'ready
+               :chunk (list (list :id 1 :date 0))
+               :source (chat-digest-source-create
+                        :mark-read (lambda (&rest _) (user-error "Wrong account"))))))
+    (puthash (chat-digest--key chat) job chat-digest--jobs)
+    (unwind-protect
+        (progn
+          (should-error (chat-digest--approve job) :type 'user-error)
+          (should (eq (chat-digest--job-status job) 'ready)))
+      (remhash (chat-digest--key chat) chat-digest--jobs))))
+
 (ert-deftest chat-digest-test-transcript ()
   (let* ((day 1790380800)               ; a midnight, local time aside
          (a (list :id 1 :date (+ day 36000) :sender "Ann" :text "Is the RPC\nfree?"))
@@ -245,6 +261,29 @@
 
 (when (require 'telega nil t)
   (require 'chat-digest-telegram)
+
+  (ert-deftest chat-digest-test-telegram-account ()
+    ;; Chat ids are the same in every account, so a digest must refuse to
+    ;; touch its chat while another account is logged in.
+    (cl-letf (((symbol-function 'telega-server-live-p) (lambda () t)))
+      (let ((telega--me-id 2))
+        (should (string-match-p
+                 "account 1; switch"
+                 (cadr (should-error (chat-digest-telegram--chat
+                                      (list :account "1" :id 5))
+                                     :type 'user-error)))))))
+
+  (ert-deftest chat-digest-test-telegram-killed-while-fetching ()
+    ;; Telega stopping strands a digest's fetches; it is dropped and the
+    ;; digest it was remaking comes back.
+    (let* ((chat (list :source "telegram" :account "1" :id 5 :title "T"))
+           (old (make-chat-digest--job :chat chat :status 'ready))
+           (new (make-chat-digest--job :chat chat :status 'fetching :previous old)))
+      (puthash (chat-digest--key chat) new chat-digest--jobs)
+      (unwind-protect
+          (progn (run-hooks 'telega-kill-hook)
+                 (should (eq (gethash (chat-digest--key chat) chat-digest--jobs) old)))
+        (remhash (chat-digest--key chat) chat-digest--jobs))))
 
   (ert-deftest chat-digest-test-telegram-entity-urls ()
     ;; telega holds an astral character as its two UTF-16 surrogates, shown

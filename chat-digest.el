@@ -1153,24 +1153,29 @@ With CONTINUE, start the next digest when more is unread."
          (chunk (chat-digest--job-chunk job))
          (last-id (plist-get (car (last chunk)) :id)))
     (setf (chat-digest--job-status job) 'approving)
-    (funcall
-     (chat-digest-source-mark-read (chat-digest--job-source job)) chat last-id
-     (lambda (ok)
-       (chat-digest--step job
-         (if (not ok)
-             (progn (setf (chat-digest--job-status job) 'ready)
-                    (chat-digest--notify 'warning "Could not mark %s read"
-                                         (plist-get chat :title)))
-           (chat-digest--record job)
-           (if (and continue (chat-digest--job-more job))
-               (progn
-                 (message "Approved; next digest of %s on its way"
-                          (plist-get chat :title))
-                 ;; The chat reports its new read position a moment after
-                 ;; marking returns, so the position is passed on instead.
-                 (chat-digest--start chat last-id))
-             (chat-digest--notify 'done "Approved %s"
-                                  (plist-get chat :title)))))))))
+    ;; A source refusing outright, as for the wrong account, has marked
+    ;; nothing, so the digest is as approvable as before.
+    (condition-case err
+        (funcall
+         (chat-digest-source-mark-read (chat-digest--job-source job)) chat last-id
+         (lambda (ok)
+           (chat-digest--step job
+             (if (not ok)
+                 (progn (setf (chat-digest--job-status job) 'ready)
+                        (chat-digest--notify 'warning "Could not mark %s read"
+                                             (plist-get chat :title)))
+               (chat-digest--record job)
+               (if (and continue (chat-digest--job-more job))
+                   (progn
+                     (message "Approved; next digest of %s on its way"
+                              (plist-get chat :title))
+                     ;; The chat reports its new read position a moment after
+                     ;; marking returns, so the position is passed on instead.
+                     (chat-digest--start chat last-id))
+                 (chat-digest--notify 'done "Approved %s"
+                                      (plist-get chat :title)))))))
+      (error (setf (chat-digest--job-status job) 'ready)
+             (signal (car err) (cdr err))))))
 
 (defun chat-digest--record (job)
   "Save JOB's digest and record it in the registry and the index."

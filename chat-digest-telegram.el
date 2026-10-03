@@ -36,7 +36,19 @@
 (require 'chat-digest)
 (require 'telega)
 
+(defun chat-digest-telegram--check-account (account)
+  "Signal an error unless telega runs with ACCOUNT logged in.
+Chat ids are the same in every account, so the wrong one would find the
+chat and mark it read there."
+  (unless (telega-server-live-p)
+    (user-error "Telega is not running"))
+  (unless (equal account (number-to-string telega--me-id))
+    (user-error "This digest belongs to Telegram account %s; switch to it first"
+                account)))
+
 (defun chat-digest-telegram--chat (chat)
+  "Return the telega chat for CHAT, in the account CHAT belongs to."
+  (chat-digest-telegram--check-account (plist-get chat :account))
   (or (telega-chat-get (plist-get chat :id) 'offline)
       (user-error "Telegram chat %s is not known to telega" (plist-get chat :id))))
 
@@ -286,10 +298,7 @@ this asks again from the farthest one until a page adds nothing."
 ;;;; Opening
 
 (defun chat-digest-telegram--open-message (account chat-id message-id)
-  (unless (telega-server-live-p)
-    (user-error "Telega is not running"))
-  (unless (equal account (number-to-string telega--me-id))
-    (user-error "This digest belongs to another Telegram account, %s" account))
+  (chat-digest-telegram--check-account account)
   (let* ((tchat (telega-chat-get (string-to-number chat-id)))
          (buffer (telega-chatbuf--get-create tchat :no-history-load)))
     ;; Preview mode goes on before the buffer is displayed: creating it opens
@@ -299,6 +308,21 @@ this asks again from the farthest one until a page adds nothing."
         (telega-chat-preview-mode 1)))
     (with-current-buffer (telega-chat--pop-to-buffer tchat :no-history-load)
       (telega-chatbuf--goto-msg (string-to-number message-id) 'highlight))))
+
+(defun chat-digest-telegram--drop-fetching ()
+  "Drop the Telegram digests still fetching messages.
+Their requests went to the telega-server just killed, and no answer will
+come; a digest one of them was remaking comes back."
+  (maphash (lambda (_key job)
+             (when (and (equal (plist-get (chat-digest--job-chat job) :source)
+                               "telegram")
+                        (eq (chat-digest--job-status job) 'fetching))
+               (chat-digest--abandon job)
+               (message "Digest of %s dropped: telega stopped while fetching"
+                        (plist-get (chat-digest--job-chat job) :title))))
+           (copy-hash-table chat-digest--jobs)))
+
+(add-hook 'telega-kill-hook #'chat-digest-telegram--drop-fetching)
 
 (chat-digest-register-source
  (chat-digest-source-create
