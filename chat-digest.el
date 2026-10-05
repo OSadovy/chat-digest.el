@@ -531,7 +531,8 @@ NAMES maps ids to message names, BY-ID ids to the messages held."
 
 (defun chat-digest--transcript (messages names by-id &optional previous)
   "Render MESSAGES for the model, marking days and silences.
-PREVIOUS is the message before the first, if any."
+NAMES and BY-ID are as for `chat-digest--message-line'.  PREVIOUS is
+the message before the first, if any."
   (mapconcat
    (lambda (m)
      (let* ((date (plist-get m :date))
@@ -550,8 +551,9 @@ PREVIOUS is the message before the first, if any."
 
 (defun chat-digest--prompt (chat interests threads context chunk names by-id)
   "Return the request for a digest of CHUNK in CHAT.
-THREADS are registry entries offered for continuation, CONTEXT the
-already-read messages, NAMES and BY-ID tables of the messages held."
+INTERESTS say what matters there, THREADS are registry entries offered
+for continuation, CONTEXT the already-read messages, NAMES and BY-ID
+tables of the messages held."
   (concat
    (format "Chat: %s\n\n" (plist-get chat :title))
    "The reader's interests:\n" interests "\n\n"
@@ -576,9 +578,9 @@ already-read messages, NAMES and BY-ID tables of the messages held."
    "\n"))
 
 (defun chat-digest--thread-of (m by-id state)
-  "Return the registry thread M continues, following replies through BY-ID.
-The chain may leave the messages held, so the last parent named is
-looked up too."
+  "Return the thread of registry STATE that M continues.
+Replies are followed through BY-ID.  The chain may leave the messages
+held, so the last parent named is looked up too."
   (let ((registered (gethash "messages" state)) (thread nil) (hops 0))
     (while (and m (not thread) (< hops 100))
       (let ((parent (plist-get m :reply-to)))
@@ -590,9 +592,10 @@ looked up too."
     thread))
 
 (defun chat-digest--offered-threads (state chunk by-id)
-  "Return the registry threads to offer for CHUNK, as plists.
+  "Return the threads of registry STATE to offer for CHUNK, as plists.
 Those active within `chat-digest-thread-active-days' of its start,
-and any older one a message in it replies into."
+and any older one a message in it replies into, following replies
+through BY-ID."
   (let* ((threads (gethash "threads" state))
          (since (- (plist-get (car chunk) :date)
                    (* chat-digest-thread-active-days 86400)))
@@ -886,7 +889,8 @@ FETCHED are the messages added this way so far."
                     (append found fetched) (if found (1- hops) 0))))))))
 
 (defun chat-digest--gather-run-ups (job context tops)
-  "Add to CONTEXT the conversation running into each of TOPS, then go on."
+  "Add to CONTEXT the conversation running into each of TOPS.
+Then go on with JOB."
   (if (null tops)
       (chat-digest--enrich-and-ask job context)
     (let ((top (car tops)))
@@ -991,8 +995,7 @@ with the next digest.\n"
                                      (chat-digest--job-chunk job)
                                      (chat-digest--urls
                                       (append (chat-digest--job-context job)
-                                              (chat-digest--job-chunk job)))))
-         )
+                                              (chat-digest--job-chunk job))))))
     (setf (chat-digest--job-digest job) digest
           (chat-digest--job-status job) 'ready
           (chat-digest--job-cancel job) nil
@@ -1160,7 +1163,7 @@ A thread the model continued keeps its id; any other gets a new one."
           (puthash (format "%s" (plist-get m :id)) id messages))))))
 
 (defun chat-digest--digest-file (chat chunk)
-  "Return a fresh file name for the digest beginning with CHUNK."
+  "Return a fresh file name for the digest of CHAT beginning with CHUNK."
   (let* ((dir (chat-digest--digests-directory chat))
          (base (format-time-string "%Y-%m-%d-%H%M" (plist-get (car chunk) :date)))
          (name (concat base ".org"))
