@@ -4,7 +4,6 @@
 
 ;; Author: Oleksii Sadovyi <3742880+OSadovy@users.noreply.github.com>
 ;; Keywords: comm
-;; Package-Requires: ((emacs "29.1") (gptel "0.9.9"))
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -21,7 +20,8 @@
 ;; Sends the request for a digest through one of gptel's backends, with
 ;; tools switched off: the messages are written by strangers, and the model
 ;; reading them should be able to do nothing but answer.  Loaded when
-;; `chat-digest-model' names gptel.
+;; `chat-digest-model' names gptel.  It needs gptel 0.9.9 or later, which
+;; the package does not require, since it works without.
 
 ;;; Code:
 

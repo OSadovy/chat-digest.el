@@ -4,7 +4,6 @@
 
 ;; Author: Oleksii Sadovyi <3742880+OSadovy@users.noreply.github.com>
 ;; Keywords: comm
-;; Package-Requires: ((emacs "29.1") (telega "0.8"))
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -18,7 +17,9 @@
 
 ;;; Commentary:
 
-;; Reads Telegram chats through telega's running session.
+;; Reads Telegram chats through telega's running session.  It needs telega
+;; 0.8 or later, which the package does not require, since it works
+;; without Telegram.
 ;;
 ;; Fetching history does not mark anything read.  Telegram reads a chat up
 ;; to a message, not message by message, so marking the last message of a
