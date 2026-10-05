@@ -81,15 +81,52 @@ telegram/ACCOUNT/CHAT/
 
 Chats are kept by id, since titles change; `index.org` is where their names are.
 
+## What leaves the machine
+
+A digest sends the model's provider what it covers: the messages, with their
+senders' names, the context described above, the chat's title, its interests
+and the thread registry. That is Anthropic through Claude Code, or whoever
+serves the gptel backend chosen. These are other people's messages, so be sure
+the chat is one you may share that way. `last-prompt.txt` keeps the most recent
+request on disk.
+
 ## Setup
 
 Needs Emacs 29.1, and either the `claude` CLI logged in or gptel; for
 Telegram, telega. A gptel backend's model must be one the backend lists: gptel
 otherwise sends the backend's first model in its place.
 
+On Emacs 30, `use-package` installs it from this repository:
+
 ```elisp
-(with-eval-after-load 'telega
-  (require 'chat-digest-telegram))
+(use-package chat-digest
+  :vc (:url "https://github.com/OSadovy/chat-digest.el" :rev :newest)
+  :defer t
+  :init
+  ;; The Telegram source needs telega, so it waits for telega to load.
+  (with-eval-after-load 'telega
+    (require 'chat-digest-telegram)))
+```
+
+On Emacs 29, install it once with `M-x package-vc-install`, giving the same
+URL, and leave `:vc` out.
+
+## Configuration
+
+Everything is in `M-x customize-group RET chat-digest`. Besides the model and
+the size of a digest, two options are for fitting it to the reader:
+
+- `chat-digest-extra-instructions` is added to the model's instructions in
+  every chat, for how you take digests in. What matters in one chat belongs in
+  its `interests.org` instead, edited with `i` from a digest.
+- `chat-digest-notify-functions` are called with the kind of each
+  notification, `done` or `warning`, and its text.
+
+```elisp
+(setq chat-digest-extra-instructions
+      "Write in English, whatever the language of the chat.")
+(add-hook 'chat-digest-notify-functions
+          (lambda (kind _text) (when (eq kind 'warning) (ding))))
 ```
 
 ## Development
