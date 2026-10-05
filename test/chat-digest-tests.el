@@ -1,5 +1,17 @@
 ;;; chat-digest-tests.el --- Tests for chat-digest -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026 Oleksii Sadovyi
+
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
 ;;; Commentary:
 
 ;; What is tested is our own logic: where a digest is cut, what context it
