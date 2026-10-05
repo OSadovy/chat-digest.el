@@ -190,6 +190,18 @@
         (remhash (chat-digest--key chat) chat-digest--jobs)
         (delete-directory chat-digest-directory t)))))
 
+(ert-deftest chat-digest-test-configuration ()
+  ;; Extra instructions follow the model's own; notifications reach the
+  ;; hook with their kind as well as the echo area.
+  (let ((chat-digest-extra-instructions "  Be brief.\n")
+        (heard nil))
+    (should (string-suffix-p "\n\nBe brief." (chat-digest--instructions)))
+    (should (string-prefix-p chat-digest--system-prompt (chat-digest--instructions)))
+    (let ((chat-digest-notify-functions
+           (list (lambda (kind text) (push (cons kind text) heard)))))
+      (chat-digest--notify 'warning "Digest of %s failed" "T"))
+    (should (equal heard '((warning . "Digest of T failed"))))))
+
 (ert-deftest chat-digest-test-approve-refused ()
   ;; A source that refuses to mark read has marked nothing: the digest must
   ;; stay approvable rather than stuck approving.
